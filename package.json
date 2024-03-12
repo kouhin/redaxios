@@ -9,8 +9,8 @@
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "microbundle && tsc",
-    "test": "npm run format:check && eslint src test && karmatic",
-    "release": "npm run build && npm t && git commit -am \"$npm_package_version\" && git tag $npm_package_version && git push && git push --tags && npm publish",
+    "test": "pnpm format:check && eslint src test",
+    "release": "pnpm build && pnpm test && git commit -am \"$npm_package_version\" && git tag $npm_package_version && git push && git push --tags && pnpm publish",
     "format": "prettier --write './**/*.{js,json,yml,md}'",
     "format:check": "prettier --check './**/*.{js,json,yml,md}'"
   },
@@ -61,7 +61,6 @@
     "eslint-config-prettier": "6.11.0",
     "file-loader": "^5.0.2",
     "isomorphic-fetch": "^2.2.1",
-    "karmatic": "^2.1.0",
     "microbundle": "^0.11.0",
     "npm-merge-driver-install": "^1.1.1",
     "prettier": "2.0.5",
