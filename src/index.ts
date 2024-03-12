@@ -14,7 +14,7 @@
 interface RequestHeaders {
 	[name: string]: string;
 }
-type HttpMethod =
+export type Method =
 	| 'get'
 	| 'post'
 	| 'put'
@@ -30,55 +30,55 @@ type HttpMethod =
 	| 'OPTIONS'
 	| 'HEAD';
 
-interface Options {
+export type ResponseType = 'arrayBuffer' | 'blob' | 'json' | 'text' | 'formData' | 'stream';
+
+export interface RedaxiosRequestConfig<D = any> {
 	/** the URL to request */
 	url?: string;
 	/** method */
-	method?: HttpMethod;
+	method?: Method | string;
+	/** a base URL from which to resolve all URLs */
+	baseURL?: string;
+	/** An array of transformations to apply to the outgoing request */
+	transformRequest?: Array<(body: any, headers?: RequestHeaders) => any>;
 	/** Request headers */
 	headers?: RequestHeaders;
-	/** a body, optionally encoded, to send */
-	body?: FormData | string | object;
-	/**
-	 * An encoding to use for the response
-	 * @default 'json'
-	 */
-	responseType?: 'text' | 'json' | 'stream' | 'blob' | 'arrayBuffer' | 'formData' | 'stream';
 	/** querystring parameters */
 	params?: Record<string, any> | URLSearchParams;
 	/** custom function to stringify querystring parameters */
-	paramsSerializer?: (params: Options['params']) => string;
+	paramsSerializer?: (params: RedaxiosRequestConfig['params']) => string;
+	/** data */
+	data?: D;
 	/** Send the request with credentials like cookies */
 	withCredentials?: boolean;
 	/** Authorization header value to send with the request */
 	auth?: string;
+	/**
+	 * An encoding to use for the response
+	 * @default 'json'
+	 */
+	responseType?: ResponseType;
 	/** Pass an Cross-site Request Forgery prevention cookie value as a header defined by `xsrfHeaderName` */
 	xsrfCookieName?: string;
 	/** The name of a header to use for passing XSRF cookies */
 	xsrfHeaderName?: string;
 	/** Override status code handling (default: 200-399 is a success) */
 	validateStatus?: (status: number) => boolean;
-	/** An array of transformations to apply to the outgoing request */
-	transformRequest?: Array<(body: any, headers?: RequestHeaders) => any>;
-	/** a base URL from which to resolve all URLs */
-	baseURL?: string;
 	/** Custom window.fetch implementation */
 	fetch?: typeof window.fetch;
-	/** data */
-	data?: any;
 }
 
-interface Response<T> {
+interface RedaxiosResponse<T = any, D = any> {
+	/** data the decoded response body */
+	data: T;
 	/** status */
 	status: number;
 	/** statusText */
 	statusText: string;
-	/** config the request configuration */
-	config: Options;
-	/** data the decoded response body */
-	data: T;
 	/** headers */
 	headers: Headers;
+	/** config the request configuration */
+	config: RedaxiosRequestConfig<D>;
 	/** redirect */
 	redirect: boolean;
 	/** url */
@@ -87,96 +87,125 @@ interface Response<T> {
 	type: ResponseType;
 	/** body */
 	body: ReadableStream<Uint8Array> | null;
-	/** bodyUsed */
-	bodyUsed: boolean;
 }
 
-type UrlOrConfig = string | (Options & { url: string });
+export class RedaxiosError<T = unknown, D = any> extends Error {
+	config: RedaxiosRequestConfig<D>;
+	response: RedaxiosResponse<T>;
+	isAxiosError: boolean;
 
-type BodylessMethod = <T = any>(url: UrlOrConfig, config?: Options) => Promise<Response<T>>;
+	constructor(message: string, response: RedaxiosResponse<T, D>, config: RedaxiosRequestConfig<D>) {
+		super(message);
+		this.name = 'RedaxiosError';
+		this.config = config;
+		this.response = response;
+		this.isAxiosError = true;
+	}
+}
 
-interface Redaxios {
-	<T = any>(url: UrlOrConfig, config?: Options, method?: HttpMethod, data?: unknown, _undefined?: undefined): Promise<
-		Response<T>
+type BodylessMethod = <T = any, D = any>(
+	url: string,
+	config?: RedaxiosRequestConfig<D>
+) => Promise<RedaxiosResponse<T, D>>;
+
+function deepMerge<T extends {}, U>(opts: T, overrides: U, lowerCase?: boolean): T & U {
+	let out: T & U = {} as any;
+	let i;
+	if (Array.isArray(opts)) {
+		// @ts-ignore
+		return opts.concat(overrides);
+	}
+	for (i in opts) {
+		const key = lowerCase ? i.toLowerCase() : i;
+		out[key] = opts[i];
+	}
+	for (i in overrides) {
+		const key = lowerCase ? i.toLowerCase() : i;
+		const value = overrides[i];
+		out[key] = key in out && typeof value == 'object' ? deepMerge(out[key], value, key == 'headers') : value;
+	}
+	return out;
+}
+
+export interface Redaxios {
+	<T = any, D = any>(config: RedaxiosRequestConfig<D>): Promise<RedaxiosResponse<T, D>>;
+	<T = any, D = any>(url: string, config?: RedaxiosRequestConfig<D>, _method?: Method, _data?: D): Promise<
+		RedaxiosResponse<T, D>
 	>;
 	get: BodylessMethod;
 	delete: BodylessMethod;
 	head: BodylessMethod;
 	options: BodylessMethod;
-	post: <T = any>(url: UrlOrConfig, data?: any, config?: Options) => Promise<Response<T>>;
-	put: <T = any>(url: UrlOrConfig, data?: any, config?: Options) => Promise<Response<T>>;
-	patch: <T = any>(url: UrlOrConfig, data?: any, config?: Options) => Promise<Response<T>>;
+	post: <T = any, D = any>(
+		url: string,
+		data?: any,
+		config?: RedaxiosRequestConfig<D>
+	) => Promise<RedaxiosResponse<T, D>>;
+	put: <T = any, D = any>(
+		url: string,
+		data?: any,
+		config?: RedaxiosRequestConfig<D>
+	) => Promise<RedaxiosResponse<T, D>>;
+	patch: <T = any, D = any>(
+		url: string,
+		data?: any,
+		config?: RedaxiosRequestConfig<D>
+	) => Promise<RedaxiosResponse<T, D>>;
 	all: typeof Promise.all;
-	spread: <Args, R>(fn: (...args: Args[]) => R) => (array: Args[]) => R;
 	CancelToken: typeof AbortController;
-	defaults: Options;
-	create: (defaults?: Options) => Redaxios;
+	defaults: RedaxiosRequestConfig;
+	create: (defaults?: RedaxiosRequestConfig) => Redaxios;
 }
 
-function create(defaults: Options = {}): Redaxios {
+function create(defaults: RedaxiosRequestConfig = {}): Redaxios {
 	defaults = defaults || {};
 
 	redaxios.request = redaxios;
 
-	redaxios.get = <T = any>(url: UrlOrConfig, config?: Options) => redaxios<T>(url, config, 'get');
+	redaxios.get = <T = any, D = any>(url: string, config?: RedaxiosRequestConfig<D>) =>
+		redaxios<T, D>(url, config, 'get');
 
-	redaxios.delete = <T = any>(url: UrlOrConfig, config?: Options) => redaxios<T>(url, config, 'delete');
+	redaxios.delete = <T = any, D = any>(url: string, config?: RedaxiosRequestConfig<D>) =>
+		redaxios<T, D>(url, config, 'delete');
 
-	redaxios.head = <T = any>(url: UrlOrConfig, config?: Options) => redaxios<T>(url, config, 'head');
+	redaxios.head = <T = any, D = any>(url: string, config?: RedaxiosRequestConfig<D>) =>
+		redaxios<T, D>(url, config, 'head');
 
-	redaxios.options = <T = any>(url: UrlOrConfig, config?: Options) => redaxios<T>(url, config, 'options');
+	redaxios.options = <T = any, D = any>(url: string, config?: RedaxiosRequestConfig<D>) =>
+		redaxios<T, D>(url, config, 'options');
 
-	redaxios.post = <T = any>(url: UrlOrConfig, data?: any, config?: Options) => redaxios<T>(url, config, 'post', data);
+	redaxios.post = <T = any, D = any>(url: string, data?: D, config?: RedaxiosRequestConfig<D>) =>
+		redaxios<T, D>(url, config, 'post', data);
 
-	redaxios.put = <T = any>(url: UrlOrConfig, data?: any, config?: Options) => redaxios<T>(url, config, 'put', data);
+	redaxios.put = <T = any, D = any>(url: string, data?: D, config?: RedaxiosRequestConfig<D>) =>
+		redaxios<T, D>(url, config, 'put', data);
 
-	redaxios.patch = <T = any>(url: UrlOrConfig, data?: any, config?: Options) => redaxios<T>(url, config, 'patch', data);
+	redaxios.patch = <T = any, D = any>(url: string, data?: D, config?: RedaxiosRequestConfig<D>) =>
+		redaxios<T, D>(url, config, 'patch', data);
 
 	redaxios.all = Promise.all.bind(Promise);
-
-	redaxios.spread = <Args, R>(fn: (...args: Args[]) => R) => fn.apply.bind(fn, fn) as (array: Args[]) => R;
-
-	function deepMerge<T extends Object, U extends Object>(opts: T, overrides: U, lowerCase?: boolean): T & U {
-		let out: T & U = {} as T & U,
-			i;
-		if (Array.isArray(opts)) {
-			// @ts-ignore
-			return opts.concat(overrides);
-		}
-		for (i in opts) {
-			const key = lowerCase ? i.toLowerCase() : i;
-			out[key] = opts[i];
-		}
-		for (i in overrides) {
-			const key = lowerCase ? i.toLowerCase() : i;
-			const value = overrides[i];
-			out[key] = key in out && typeof value == 'object' ? deepMerge(out[key], value, key == 'headers') : value;
-		}
-		return out;
-	}
 
 	/**
 	 * Issues a request.
 	 */
-	async function redaxios<T>(
-		urlOrConfig: UrlOrConfig,
-		config?: Options,
-		_method?: HttpMethod,
-		data?: unknown,
-		_undefined?: undefined
-	): Promise<Response<T>> {
-		let url = typeof urlOrConfig != 'string' ? (config = urlOrConfig).url : urlOrConfig;
+	async function redaxios<T = any, D = any>(
+		urlOrConfig: string | RedaxiosRequestConfig<D>,
+		config?: RedaxiosRequestConfig<D>,
+		_method?: Method,
+		data?: D
+	): Promise<RedaxiosResponse<T, D>> {
+		let url = typeof urlOrConfig != 'string' ? (config = urlOrConfig).url! : urlOrConfig;
 
-		const response: Response<T> = { config: config } as Response<T>;
+		const response = { config: config } as RedaxiosResponse<T, D>;
 
-		const options: Options = deepMerge(defaults, config || {});
+		const options: RedaxiosRequestConfig<D> = deepMerge(defaults, config || {});
 
 		const customHeaders: RequestHeaders = {};
 
-		data = data || options.data;
+		let body = data || options.data;
 
 		(options.transformRequest || []).map((f) => {
-			data = f(data, options.headers) || data;
+			body = f(body, options.headers) || body;
 		});
 
 		if (options.auth) {
@@ -184,12 +213,12 @@ function create(defaults: Options = {}): Redaxios {
 		}
 
 		if (
-			data &&
-			typeof data === 'object' &&
-			typeof (data as any)?.append !== 'function' &&
-			typeof (data as any)?.text !== 'function'
+			body &&
+			typeof body === 'object' &&
+			typeof (body as any)?.append !== 'function' &&
+			typeof (body as any)?.text !== 'function'
 		) {
-			data = JSON.stringify(data);
+			body = JSON.stringify(body) as any;
 			customHeaders['content-type'] = 'application/json';
 		}
 
@@ -215,9 +244,9 @@ function create(defaults: Options = {}): Redaxios {
 
 		return fetchFunc(url, {
 			method: (_method || options.method || 'get').toUpperCase(),
-			body: data as BodyInit,
+			body: (body as unknown) as BodyInit,
 			headers: deepMerge(options.headers || {}, customHeaders, true),
-			credentials: options.withCredentials ? 'include' : _undefined
+			credentials: options.withCredentials ? 'include' : undefined
 		}).then((res) => {
 			for (const i in res) {
 				if (typeof res[i] != 'function') response[i] = res[i];
@@ -232,12 +261,12 @@ function create(defaults: Options = {}): Redaxios {
 				.then((data) => {
 					response.data = data;
 					// its okay if this fails: response.data will be the unparsed value:
-					response.data = JSON.parse(data);
+					if (options.responseType !== 'text') response.data = JSON.parse(data);
 				})
 				.catch(Object)
 				.then(() => {
 					const ok = options.validateStatus ? options.validateStatus(res.status) : res.ok;
-					return ok ? response : Promise.reject({ response, isAxiosError: true });
+					return ok ? response : Promise.reject(new RedaxiosError('ERR_REDAXIOS_FAILED', response, options));
 				});
 		});
 	}
@@ -251,7 +280,7 @@ function create(defaults: Options = {}): Redaxios {
 	return redaxios;
 }
 
-export function isAxiosError(e: any): e is { response: Response<any> } {
+export function isAxiosError<T = any, D = any>(e: any): e is { response: RedaxiosResponse<T, D> } {
 	return e && e.response && e.isAxiosError === true;
 }
 
