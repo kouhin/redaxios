@@ -237,7 +237,7 @@ function create(defaults: Options = {}): Redaxios {
 				.catch(Object)
 				.then(() => {
 					const ok = options.validateStatus ? options.validateStatus(res.status) : res.ok;
-					return ok ? response : Promise.reject(response);
+					return ok ? response : Promise.reject({ response, isAxiosError: true });
 				});
 		});
 	}
@@ -249,6 +249,10 @@ function create(defaults: Options = {}): Redaxios {
 	redaxios.create = create;
 
 	return redaxios;
+}
+
+export function isAxiosError(e: any): e is { response: Response<any> } {
+	return e && e.response && e.isAxiosError === true;
 }
 
 export default create();
