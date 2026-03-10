@@ -9,6 +9,13 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * This file has been modified by kouhin (https://github.com/kouhin/redaxios).
+ * Modifications:
+ * - Rewritten from JavaScript to TypeScript with full type definitions.
+ * - Added axios-compatible error handling (RedaxiosError, createError, isAxiosError).
  */
 
 export type Method =

@@ -1,7 +1,7 @@
 {
-  "name": "redaxios",
-  "version": "0.5.1",
-  "description": "The API from Axios, as a tiny abstraction over Fetch.",
+  "name": "@kouhin/redaxios",
+  "version": "1.0.0",
+  "description": "The Axios API, as a tiny (~4KB) Fetch wrapper. Rewritten in TypeScript with axios-compatible error handling.",
   "source": "src/index.ts",
   "main": "dist/redaxios.cjs",
   "module": "dist/redaxios.js",
@@ -20,20 +20,31 @@
     "test": "bun test",
     "check": "biome check .",
     "format": "biome format --write .",
-    "release": "bun run build && bun test && git commit -am \"$npm_package_version\" && git tag $npm_package_version && git push && git push --tags && npm publish"
+    "release": "bun run build && bun test && git commit -am \"$npm_package_version\" && git tag $npm_package_version && git push && git push --tags && npm publish --access public"
   },
   "files": [
     "dist",
     "src"
   ],
-  "repository": "developit/redaxios",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kouhin/redaxios.git"
+  },
   "keywords": [
     "axios",
-    "fetch"
+    "fetch",
+    "http",
+    "typescript"
   ],
-  "author": "Jason Miller <jason@developit.ca>",
+  "author": "kouhin",
   "license": "Apache-2.0",
-  "homepage": "https://github.com/developit/redaxios",
+  "homepage": "https://github.com/kouhin/redaxios",
+  "bugs": {
+    "url": "https://github.com/kouhin/redaxios/issues"
+  },
   "devDependencies": {
     "@biomejs/biome": "^2.0.0",
     "@types/bun": "^1.2.0",
