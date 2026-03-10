@@ -63,6 +63,14 @@ export interface Response<T = any> {
 	bodyUsed: boolean;
 }
 
+export interface RedaxiosError<T = any> extends Error {
+	config: Options;
+	response: Response<T>;
+	status: number;
+	code: 'ERR_BAD_REQUEST' | 'ERR_BAD_RESPONSE' | 'ERR_NETWORK';
+	isAxiosError: true;
+}
+
 export type BodylessMethod = <T = any>(url: string, config?: Options) => Promise<Response<T>>;
 
 export type BodyMethod = <T = any>(url: string, body?: any, config?: Options) => Promise<Response<T>>;
@@ -84,6 +92,7 @@ export interface RedaxiosInstance {
 	CancelToken: typeof AbortController;
 	defaults: Options;
 	create: (defaults?: Options) => RedaxiosInstance;
+	isAxiosError: (value: any) => value is RedaxiosError;
 }
 
 function deepMerge(
@@ -107,6 +116,26 @@ function deepMerge(
 	return out;
 }
 
+function createError(
+	message: string,
+	config: Options,
+	response: Response,
+	status: number,
+	code?: RedaxiosError['code']
+): RedaxiosError {
+	const err = Object.assign(new Error(message), {
+		config,
+		response,
+		status,
+		code: code || (status >= 500 ? 'ERR_BAD_RESPONSE' : 'ERR_BAD_REQUEST'),
+		isAxiosError: true as const,
+		toJSON() {
+			return { message: err.message, config, code: err.code, status };
+		}
+	});
+	return err as RedaxiosError;
+}
+
 function create(defaults?: Options): RedaxiosInstance {
 	defaults = defaults || {};
 
@@ -124,8 +153,8 @@ function create(defaults?: Options): RedaxiosInstance {
 			url = urlOrConfig.url!;
 		}
 
-		const response = { config } as Response<any>;
 		const options: Options = deepMerge(defaults as Record<string, any>, config as Record<string, any>) as Options;
+		const response = { config: options } as Response<any>;
 		const customHeaders: Record<string, string> = {};
 
 		data = data || options.data;
@@ -168,29 +197,37 @@ function create(defaults?: Options): RedaxiosInstance {
 			body: data,
 			headers: deepMerge(options.headers as Record<string, string>, customHeaders, true) as Record<string, string>,
 			credentials: options.withCredentials ? 'include' : undefined
-		}).then((res) => {
-			for (const i in res) {
-				if (typeof (res as any)[i] !== 'function') (response as any)[i] = (res as any)[i];
-			}
+		})
+			.then((res) => {
+				for (const i in res) {
+					if (typeof (res as any)[i] !== 'function') (response as any)[i] = (res as any)[i];
+				}
 
-			if (options.responseType === 'stream') {
-				response.data = res.body;
-				return response;
-			}
+				if (options.responseType === 'stream') {
+					response.data = res.body;
+					return response;
+				}
 
-			return (res as any)
-				[options.responseType || 'text']()
-				.then((parsed: any) => {
-					response.data = parsed;
-					// its okay if this fails: response.data will be the unparsed value:
-					response.data = JSON.parse(parsed);
-				})
-				.catch(Object)
-				.then(() => {
-					const ok = options.validateStatus ? options.validateStatus(res.status) : res.ok;
-					return ok ? response : Promise.reject(response);
-				});
-		});
+				return (res as any)
+					[options.responseType || 'text']()
+					.then((parsed: any) => {
+						response.data = parsed;
+						// its okay if this fails: response.data will be the unparsed value:
+						response.data = JSON.parse(parsed);
+					})
+					.catch(Object)
+					.then(() => {
+						const ok = options.validateStatus ? options.validateStatus(res.status) : res.ok;
+						if (ok) return response;
+						return Promise.reject(
+							createError(`Request failed with status code ${res.status}`, options, response, res.status)
+						);
+					});
+			})
+			.catch((err) => {
+				if (err.isAxiosError) return Promise.reject(err);
+				return Promise.reject(createError(err.message || 'Network Error', options, response, 0, 'ERR_NETWORK'));
+			});
 	}
 
 	const instance = redaxios as unknown as RedaxiosInstance;
@@ -208,6 +245,7 @@ function create(defaults?: Options): RedaxiosInstance {
 	instance.CancelToken = (typeof AbortController === 'function' ? AbortController : Object) as typeof AbortController;
 	instance.defaults = defaults;
 	instance.create = create;
+	instance.isAxiosError = (value: any): value is RedaxiosError => value?.isAxiosError === true;
 
 	return instance;
 }

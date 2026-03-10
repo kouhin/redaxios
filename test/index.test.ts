@@ -52,7 +52,15 @@ describe('redaxios', () => {
 				await req;
 				throw new Error('should have rejected');
 			} catch (err: any) {
+				expect(err).toBeInstanceOf(Error);
+				expect(err.message).toEqual('Request failed with status code 404');
 				expect(err.status).toEqual(404);
+				expect(err.isAxiosError).toBe(true);
+				expect(err.code).toEqual('ERR_BAD_REQUEST');
+				expect(err.config).toBeDefined();
+				expect(err.response).toBeDefined();
+				expect(err.response.status).toEqual(404);
+				expect(axios.isAxiosError(err)).toBe(true);
 			}
 		});
 	});
@@ -341,6 +349,166 @@ describe('redaxios', () => {
 			const paramsSerializer = () => 'e=iamthelaw';
 			axios.get('/foo', { params, paramsSerializer });
 			expect(fetchMock.mock.calls[0][0]).toEqual('/foo?e=iamthelaw');
+		});
+	});
+
+	describe('error handling', () => {
+		it('should produce ERR_BAD_REQUEST for 4xx errors', async () => {
+			const originalFetch = globalThis.fetch;
+			try {
+				globalThis.fetch = jest.fn(() =>
+					Promise.resolve({
+						ok: false,
+						status: 400,
+						statusText: 'Bad Request',
+						text: () => Promise.resolve('bad')
+					} as any)
+				) as any;
+				await expect(axios.get('/foo')).rejects.toThrow('Request failed with status code 400');
+				try {
+					await axios.get('/bar');
+				} catch (err: any) {
+					expect(err.code).toEqual('ERR_BAD_REQUEST');
+					expect(err.status).toEqual(400);
+				}
+			} finally {
+				globalThis.fetch = originalFetch;
+			}
+		});
+
+		it('should produce ERR_BAD_RESPONSE for 5xx errors', async () => {
+			const originalFetch = globalThis.fetch;
+			try {
+				globalThis.fetch = jest.fn(() =>
+					Promise.resolve({
+						ok: false,
+						status: 500,
+						statusText: 'Internal Server Error',
+						text: () => Promise.resolve('error')
+					} as any)
+				) as any;
+				try {
+					await axios.get('/foo');
+					throw new Error('should have rejected');
+				} catch (err: any) {
+					expect(err).toBeInstanceOf(Error);
+					expect(err.message).toEqual('Request failed with status code 500');
+					expect(err.code).toEqual('ERR_BAD_RESPONSE');
+					expect(err.status).toEqual(500);
+					expect(err.isAxiosError).toBe(true);
+				}
+			} finally {
+				globalThis.fetch = originalFetch;
+			}
+		});
+
+		it('should produce ERR_NETWORK for network failures', async () => {
+			const originalFetch = globalThis.fetch;
+			try {
+				globalThis.fetch = jest.fn(() => Promise.reject(new TypeError('Failed to fetch'))) as any;
+				try {
+					await axios.get('/foo');
+					throw new Error('should have rejected');
+				} catch (err: any) {
+					expect(err).toBeInstanceOf(Error);
+					expect(err.message).toEqual('Failed to fetch');
+					expect(err.code).toEqual('ERR_NETWORK');
+					expect(err.status).toEqual(0);
+					expect(err.isAxiosError).toBe(true);
+				}
+			} finally {
+				globalThis.fetch = originalFetch;
+			}
+		});
+
+		it('should include response data in error.response', async () => {
+			const originalFetch = globalThis.fetch;
+			try {
+				globalThis.fetch = jest.fn(() =>
+					Promise.resolve({
+						ok: false,
+						status: 422,
+						statusText: 'Unprocessable Entity',
+						text: () => Promise.resolve('{"errors":["invalid"]}')
+					} as any)
+				) as any;
+				try {
+					await axios.post('/foo', { bad: 'data' });
+					throw new Error('should have rejected');
+				} catch (err: any) {
+					expect(err.response).toBeDefined();
+					expect(err.response.status).toEqual(422);
+					expect(err.response.data).toEqual({ errors: ['invalid'] });
+				}
+			} finally {
+				globalThis.fetch = originalFetch;
+			}
+		});
+
+		it('should include config in error', async () => {
+			const originalFetch = globalThis.fetch;
+			try {
+				globalThis.fetch = jest.fn(() =>
+					Promise.resolve({ ok: false, status: 403, text: () => Promise.resolve('') } as any)
+				) as any;
+				try {
+					await axios.get('/secret', { headers: { 'x-token': 'abc' } });
+					throw new Error('should have rejected');
+				} catch (err: any) {
+					expect(err.config).toBeDefined();
+					expect(err.config.headers).toEqual({ 'x-token': 'abc' });
+				}
+			} finally {
+				globalThis.fetch = originalFetch;
+			}
+		});
+
+		it('should respect custom validateStatus', async () => {
+			const originalFetch = globalThis.fetch;
+			try {
+				globalThis.fetch = jest.fn(() =>
+					Promise.resolve({ ok: true, status: 202, text: () => Promise.resolve('accepted') } as any)
+				) as any;
+				try {
+					await axios.get('/foo', { validateStatus: (s) => s === 200 });
+					throw new Error('should have rejected');
+				} catch (err: any) {
+					expect(err.status).toEqual(202);
+					expect(err.code).toEqual('ERR_BAD_REQUEST');
+					expect(err.isAxiosError).toBe(true);
+				}
+			} finally {
+				globalThis.fetch = originalFetch;
+			}
+		});
+
+		it('should support error toJSON()', async () => {
+			const originalFetch = globalThis.fetch;
+			try {
+				globalThis.fetch = jest.fn(() =>
+					Promise.resolve({ ok: false, status: 404, text: () => Promise.resolve('') } as any)
+				) as any;
+				try {
+					await axios.get('/missing');
+					throw new Error('should have rejected');
+				} catch (err: any) {
+					const json = err.toJSON();
+					expect(json.message).toEqual('Request failed with status code 404');
+					expect(json.status).toEqual(404);
+					expect(json.code).toEqual('ERR_BAD_REQUEST');
+					expect(json.config).toBeDefined();
+				}
+			} finally {
+				globalThis.fetch = originalFetch;
+			}
+		});
+
+		it('axios.isAxiosError should identify redaxios errors', () => {
+			expect(axios.isAxiosError(new Error('nope'))).toBe(false);
+			expect(axios.isAxiosError(null)).toBe(false);
+			expect(axios.isAxiosError(undefined)).toBe(false);
+			expect(axios.isAxiosError({ isAxiosError: true })).toBe(true);
+			expect(axios.isAxiosError({ isAxiosError: false })).toBe(false);
 		});
 	});
 
