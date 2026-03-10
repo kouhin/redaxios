@@ -13,14 +13,13 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v1
-      - uses: actions/setup-node@v1
-        with:
-          node-version: 12
-      - name: npm install, build, and test
-        run: |
-          npm ci
-          npm run build --if-present
-          npm test
-        env:
-          CI: true
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - name: Install dependencies
+        run: bun install
+      - name: Lint & Format check
+        run: bun run check
+      - name: Build
+        run: bun run build
+      - name: Test
+        run: bun test
