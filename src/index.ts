@@ -18,24 +18,9 @@
  * - Added axios-compatible error handling (RedaxiosError, createError, isAxiosError).
  */
 
-export type Method =
-	| 'get'
-	| 'post'
-	| 'put'
-	| 'patch'
-	| 'delete'
-	| 'options'
-	| 'head'
-	| 'GET'
-	| 'POST'
-	| 'PUT'
-	| 'PATCH'
-	| 'DELETE'
-	| 'OPTIONS'
-	| 'HEAD';
-
+type LC = 'get' | 'post' | 'put' | 'patch' | 'delete' | 'options' | 'head';
+export type Method = LC | Uppercase<LC>;
 export type ResponseType = 'text' | 'json' | 'stream' | 'blob' | 'arrayBuffer' | 'formData';
-
 export type RequestHeaders = Record<string, string> | Headers;
 
 export interface Options {
@@ -79,13 +64,11 @@ export interface RedaxiosError<T = any> extends Error {
 }
 
 export type BodylessMethod = <T = any>(url: string, config?: Options) => Promise<Response<T>>;
-
 export type BodyMethod = <T = any>(url: string, body?: any, config?: Options) => Promise<Response<T>>;
 
 export interface RedaxiosInstance {
 	<T = any>(config: Options): Promise<Response<T>>;
 	<T = any>(url: string, config?: Options): Promise<Response<T>>;
-
 	request: RedaxiosInstance;
 	get: BodylessMethod;
 	delete: BodylessMethod;
@@ -100,167 +83,119 @@ export interface RedaxiosInstance {
 	isCancel: (value: any) => boolean;
 }
 
-function deepMerge(
-	opts: Record<string, any>,
-	overrides?: Record<string, any>,
-	lowerCase?: boolean
-): Record<string, any> {
+function deepMerge(opts: Record<string, any>, overrides?: Record<string, any>, lc?: boolean): Record<string, any> {
+	if (Array.isArray(opts)) return (opts as any[]).concat(overrides);
 	const out: Record<string, any> = {};
-	if (Array.isArray(opts)) {
-		return (opts as any[]).concat(overrides);
-	}
-	for (const i in opts) {
-		const key = lowerCase ? i.toLowerCase() : i;
-		out[key] = opts[i];
-	}
+	for (const i in opts) out[lc ? i.toLowerCase() : i] = opts[i];
 	for (const i in overrides) {
-		const key = lowerCase ? i.toLowerCase() : i;
-		const value = overrides[i];
-		out[key] = key in out && typeof value === 'object' ? deepMerge(out[key], value, key === 'headers') : value;
+		const k = lc ? i.toLowerCase() : i,
+			v = overrides[i];
+		out[k] = k in out && typeof v === 'object' ? deepMerge(out[k], v, k === 'headers') : v;
 	}
 	return out;
 }
 
 function createError(
-	message: string,
+	msg: string,
 	config: Options,
 	response: Response,
 	status: number,
 	code?: RedaxiosError['code']
 ): RedaxiosError {
-	const err = Object.assign(new Error(message), {
+	const err = Object.assign(new Error(msg), {
 		config,
 		response,
 		status,
 		code: code || (status >= 500 ? 'ERR_BAD_RESPONSE' : 'ERR_BAD_REQUEST'),
 		isAxiosError: true as const,
-		toJSON() {
-			return { message: err.message, config, code: err.code, status };
-		}
+		toJSON: () => ({ message: err.message, config, code: err.code, status })
 	});
 	return err as RedaxiosError;
 }
 
-function create(defaults?: Options): RedaxiosInstance {
-	defaults = defaults || {};
-
+function create(defaults: Options = {}): RedaxiosInstance {
 	function redaxios<T = any>(
 		urlOrConfig: string | Options,
 		config?: Options,
 		_method?: string,
-		data?: any
+		_data?: any
 	): Promise<Response<T>> {
-		let url: string;
-		if (typeof urlOrConfig === 'string') {
-			url = urlOrConfig;
-		} else {
-			config = urlOrConfig;
-			url = urlOrConfig.url!;
-		}
+		if (typeof urlOrConfig !== 'string') config = urlOrConfig;
+		let url = typeof urlOrConfig === 'string' ? urlOrConfig : urlOrConfig.url!;
+		const opts = deepMerge(defaults as Record<string, any>, config as Record<string, any>) as Options;
+		const resp = { config: opts } as Response<any>;
+		const hdrs: Record<string, string> = {};
+		let data = _data || opts.data;
 
-		const options: Options = deepMerge(defaults as Record<string, any>, config as Record<string, any>) as Options;
-		const response = { config: options } as Response<any>;
-		const customHeaders: Record<string, string> = {};
-
-		data = data || options.data;
-
-		for (const f of options.transformRequest || []) {
-			data = f(data, options.headers) || data;
-		}
-
-		if (options.auth) {
-			customHeaders.authorization = options.auth;
-		}
-
+		for (const f of opts.transformRequest || []) data = f(data, opts.headers) || data;
+		if (opts.auth) hdrs.authorization = opts.auth;
 		if (data && typeof data === 'object' && typeof data.append !== 'function' && typeof data.text !== 'function') {
 			data = JSON.stringify(data);
-			customHeaders['content-type'] = 'application/json';
+			hdrs['content-type'] = 'application/json';
 		}
-
-		if (options.baseURL) {
-			url = url.replace(/^(?!.*\/\/)\/?/, `${options.baseURL}/`);
-		}
-
-		if (options.params) {
+		if (opts.baseURL) url = url.replace(/^(?!.*\/\/)\/?/, `${opts.baseURL}/`);
+		if (opts.params)
 			url +=
 				(~url.indexOf('?') ? '&' : '?') +
-				(options.paramsSerializer
-					? options.paramsSerializer(options.params)
-					: new URLSearchParams(options.params as Record<string, string>));
-		}
+				(opts.paramsSerializer
+					? opts.paramsSerializer(opts.params)
+					: new URLSearchParams(opts.params as Record<string, string>));
 
-		const fetchFunc = options.fetch || fetch;
+		const sig =
+			opts.timeout && opts.signal
+				? AbortSignal.any([opts.signal, AbortSignal.timeout(opts.timeout)])
+				: opts.timeout
+					? AbortSignal.timeout(opts.timeout)
+					: opts.signal;
 
-		const fetchSignal =
-			options.timeout && options.signal
-				? AbortSignal.any([options.signal, AbortSignal.timeout(options.timeout)])
-				: options.timeout
-					? AbortSignal.timeout(options.timeout)
-					: options.signal;
-
-		return fetchFunc(url, {
-			method: (_method || (options.method as string) || 'get').toUpperCase(),
+		return (opts.fetch || fetch)(url, {
+			method: (_method || (opts.method as string) || 'get').toUpperCase(),
 			body: data,
-			headers: deepMerge(options.headers as Record<string, string>, customHeaders, true) as Record<string, string>,
-			credentials: options.withCredentials ? 'include' : undefined,
-			signal: fetchSignal
+			headers: deepMerge(opts.headers as Record<string, string>, hdrs, true) as Record<string, string>,
+			credentials: opts.withCredentials ? 'include' : undefined,
+			signal: sig
 		})
 			.then((res) => {
-				for (const i in res) {
-					if (typeof (res as any)[i] !== 'function') (response as any)[i] = (res as any)[i];
+				for (const i in res) if (typeof (res as any)[i] !== 'function') (resp as any)[i] = (res as any)[i];
+				if (opts.responseType === 'stream') {
+					resp.data = res.body;
+					return resp;
 				}
-
-				if (options.responseType === 'stream') {
-					response.data = res.body;
-					return response;
-				}
-
 				return (res as any)
-					[options.responseType || 'text']()
-					.then((parsed: any) => {
-						response.data = parsed;
-						// its okay if this fails: response.data will be the unparsed value:
-						response.data = JSON.parse(parsed);
+					[opts.responseType || 'text']()
+					.then((d: any) => {
+						resp.data = d;
+						resp.data = JSON.parse(d);
 					})
 					.catch(Object)
-					.then(() => {
-						const ok = options.validateStatus ? options.validateStatus(res.status) : res.ok;
-						if (ok) return response;
-						return Promise.reject(
-							createError(`Request failed with status code ${res.status}`, options, response, res.status)
-						);
-					});
-			})
-			.catch((err) => {
-				if (err.isAxiosError) return Promise.reject(err);
-				if (err.name === 'TimeoutError') {
-					return Promise.reject(
-						createError(`timeout of ${options.timeout}ms exceeded`, options, response, 0, 'ECONNABORTED')
+					.then(() =>
+						(opts.validateStatus ? opts.validateStatus(res.status) : res.ok)
+							? resp
+							: Promise.reject(createError(`Request failed with status code ${res.status}`, opts, resp, res.status))
 					);
-				}
-				if (fetchSignal?.aborted) {
-					return Promise.reject(createError('canceled', options, response, 0, 'ERR_CANCELED'));
-				}
-				return Promise.reject(createError(err.message || 'Network Error', options, response, 0, 'ERR_NETWORK'));
-			});
+			})
+			.catch((err) =>
+				Promise.reject(
+					err.isAxiosError
+						? err
+						: err.name === 'TimeoutError'
+							? createError(`timeout of ${opts.timeout}ms exceeded`, opts, resp, 0, 'ECONNABORTED')
+							: sig?.aborted
+								? createError('canceled', opts, resp, 0, 'ERR_CANCELED')
+								: createError(err.message || 'Network Error', opts, resp, 0, 'ERR_NETWORK')
+				)
+			);
 	}
 
-	const instance = redaxios as unknown as RedaxiosInstance;
-
-	instance.request = instance;
-	instance.get = (url, config) => redaxios(url, config, 'get');
-	instance.delete = (url, config) => redaxios(url, config, 'delete');
-	instance.head = (url, config) => redaxios(url, config, 'head');
-	instance.options = (url, config) => redaxios(url, config, 'options');
-	instance.post = (url, data, config) => redaxios(url, config, 'post', data);
-	instance.put = (url, data, config) => redaxios(url, config, 'put', data);
-	instance.patch = (url, data, config) => redaxios(url, config, 'patch', data);
-	instance.defaults = defaults;
-	instance.create = create;
-	instance.isAxiosError = (value: any): value is RedaxiosError => value?.isAxiosError === true;
-	instance.isCancel = (value: any): boolean => value?.code === 'ERR_CANCELED';
-
-	return instance;
+	const ax = redaxios as unknown as RedaxiosInstance;
+	ax.request = ax;
+	for (const m of ['get', 'delete', 'head', 'options'] as const) ax[m] = (u, c) => redaxios(u, c, m);
+	for (const m of ['post', 'put', 'patch'] as const) ax[m] = (u, d, c) => redaxios(u, c, m, d);
+	ax.defaults = defaults;
+	ax.create = create;
+	ax.isAxiosError = (v: any): v is RedaxiosError => v?.isAxiosError === true;
+	ax.isCancel = (v: any) => v?.code === 'ERR_CANCELED';
+	return ax;
 }
 
 export default create();
