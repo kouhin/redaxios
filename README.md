@@ -24,7 +24,8 @@ This fork addresses all of the above while keeping the original design philosoph
 - **Axios-compatible error handling** -- errors are proper `Error` instances with `message`, `status`, `code` (`ERR_BAD_REQUEST` / `ERR_BAD_RESPONSE` / `ERR_NETWORK` / `ERR_CANCELED` / `ECONNABORTED`), `response`, `config`, and `isAxiosError` flag.
 - **`axios.isAxiosError()` helper** for type-safe error checking.
 - **Request cancellation** via `AbortController` / `signal` option, with `axios.isCancel()` helper.
-- **Request timeout** via `timeout` option (in milliseconds), implemented with `AbortController`.
+- **Request timeout** via `timeout` option (in milliseconds), using `AbortSignal.timeout()`.
+- **Removed deprecated/legacy features**: `CancelToken`, `axios.all()`, `axios.spread()`, XSRF cookie handling.
 - **Modern toolchain**: [Bun](https://bun.sh) for package management, building, and testing; [Biome](https://biomejs.dev) for linting and formatting.
 - **ESM + CJS dual output** (UMD removed as obsolete).
 
@@ -101,11 +102,10 @@ This library is designed as a drop-in replacement for [Axios]. Refer to the [Axi
 - `axios(url, config?)` / `axios(config)`
 - `axios.get()`, `.post()`, `.put()`, `.patch()`, `.delete()`, `.head()`, `.options()`
 - `axios.create(defaults)`
-- `axios.all()` / `axios.spread()`
 - `axios.isAxiosError()` / `axios.isCancel()`
 - Request cancellation via `signal` (`AbortSignal`)
 - Request timeout via `timeout` (milliseconds)
-- Request/response interceptors via `transformRequest`
+- Request body transforms via `transformRequest`
 - `baseURL`, `params`, `paramsSerializer`, `headers`, `auth`, `validateStatus`
 - `responseType` (`text`, `json`, `blob`, `arrayBuffer`, `stream`, `formData`)
 - Custom `fetch` implementation via `options.fetch`

@@ -48,8 +48,6 @@ export interface Options {
 	paramsSerializer?: (params: Options['params']) => string;
 	withCredentials?: boolean;
 	auth?: string;
-	xsrfCookieName?: string;
-	xsrfHeaderName?: string;
 	validateStatus?: (status: number) => boolean;
 	transformRequest?: Array<(body: any, headers?: RequestHeaders) => any>;
 	baseURL?: string;
@@ -96,8 +94,6 @@ export interface RedaxiosInstance {
 	post: BodyMethod;
 	put: BodyMethod;
 	patch: BodyMethod;
-	all: typeof Promise.all;
-	spread: <Args, R>(fn: (...args: Args[]) => R) => (array: Args[]) => R;
 	defaults: Options;
 	create: (defaults?: Options) => RedaxiosInstance;
 	isAxiosError: (value: any) => value is RedaxiosError;
@@ -181,12 +177,6 @@ function create(defaults?: Options): RedaxiosInstance {
 			customHeaders['content-type'] = 'application/json';
 		}
 
-		try {
-			customHeaders[options.xsrfHeaderName!] = decodeURIComponent(
-				document.cookie.match(RegExp(`(^|; )${options.xsrfCookieName}=([^;]*)`))![2]
-			);
-		} catch (_e) {}
-
 		if (options.baseURL) {
 			url = url.replace(/^(?!.*\/\/)\/?/, `${options.baseURL}/`);
 		}
@@ -201,25 +191,12 @@ function create(defaults?: Options): RedaxiosInstance {
 
 		const fetchFunc = options.fetch || fetch;
 
-		let fetchSignal: AbortSignal | undefined = options.signal;
-		let timeoutId: ReturnType<typeof setTimeout> | undefined;
-		let isTimeout = false;
-
-		if (options.timeout && options.timeout > 0) {
-			const controller = new AbortController();
-			if (fetchSignal) {
-				if (fetchSignal.aborted) {
-					controller.abort(fetchSignal.reason);
-				} else {
-					fetchSignal.addEventListener('abort', () => controller.abort(fetchSignal!.reason), { once: true });
-				}
-			}
-			timeoutId = setTimeout(() => {
-				isTimeout = true;
-				controller.abort();
-			}, options.timeout);
-			fetchSignal = controller.signal;
-		}
+		const fetchSignal =
+			options.timeout && options.signal
+				? AbortSignal.any([options.signal, AbortSignal.timeout(options.timeout)])
+				: options.timeout
+					? AbortSignal.timeout(options.timeout)
+					: options.signal;
 
 		return fetchFunc(url, {
 			method: (_method || (options.method as string) || 'get').toUpperCase(),
@@ -229,7 +206,6 @@ function create(defaults?: Options): RedaxiosInstance {
 			signal: fetchSignal
 		})
 			.then((res) => {
-				if (timeoutId) clearTimeout(timeoutId);
 				for (const i in res) {
 					if (typeof (res as any)[i] !== 'function') (response as any)[i] = (res as any)[i];
 				}
@@ -256,9 +232,8 @@ function create(defaults?: Options): RedaxiosInstance {
 					});
 			})
 			.catch((err) => {
-				if (timeoutId) clearTimeout(timeoutId);
 				if (err.isAxiosError) return Promise.reject(err);
-				if (isTimeout) {
+				if (err.name === 'TimeoutError') {
 					return Promise.reject(
 						createError(`timeout of ${options.timeout}ms exceeded`, options, response, 0, 'ECONNABORTED')
 					);
@@ -280,8 +255,6 @@ function create(defaults?: Options): RedaxiosInstance {
 	instance.post = (url, data, config) => redaxios(url, config, 'post', data);
 	instance.put = (url, data, config) => redaxios(url, config, 'put', data);
 	instance.patch = (url, data, config) => redaxios(url, config, 'patch', data);
-	instance.all = Promise.all.bind(Promise);
-	instance.spread = (fn) => (fn as any).apply.bind(fn, fn);
 	instance.defaults = defaults;
 	instance.create = create;
 	instance.isAxiosError = (value: any): value is RedaxiosError => value?.isAxiosError === true;

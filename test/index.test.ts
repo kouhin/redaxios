@@ -644,17 +644,4 @@ describe('redaxios', () => {
 		});
 	});
 
-	describe('static helpers', () => {
-		it('#all should work', async () => {
-			const result = await axios.all([Promise.resolve('hello'), Promise.resolve('world')]);
-			expect(result).toEqual(['hello', 'world']);
-		});
-
-		it('#spread should work', async () => {
-			const result = await axios
-				.all([Promise.resolve('hello'), Promise.resolve('world')])
-				.then(axios.spread((item1: string, item2: string) => `${item1} ${item2}`));
-			expect(result).toEqual('hello world');
-		});
-	});
 });
