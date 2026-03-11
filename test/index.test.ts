@@ -643,5 +643,4 @@ describe('redaxios', () => {
 			expect(axios.isCancel(undefined)).toBe(false);
 		});
 	});
-
 });
