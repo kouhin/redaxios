@@ -21,7 +21,18 @@ beforeAll(() => {
 	server = Bun.serve({
 		port: 0,
 		async fetch(req) {
-			const path = new URL(req.url).pathname;
+			const url = new URL(req.url);
+			const path = url.pathname;
+
+			const delayMatch = path.match(/^\/delay\/(\d+)$/);
+			if (delayMatch) {
+				const ms = Number.parseInt(delayMatch[1], 10);
+				await new Promise((resolve) => setTimeout(resolve, ms));
+				return new Response(JSON.stringify({ delayed: ms }), {
+					headers: { 'content-type': 'application/json' }
+				});
+			}
+
 			const file = Bun.file(`test/fixtures${path}`);
 			if (await file.exists()) return new Response(file);
 			return new Response('Not Found', { status: 404 });
@@ -509,6 +520,127 @@ describe('redaxios', () => {
 			expect(axios.isAxiosError(undefined)).toBe(false);
 			expect(axios.isAxiosError({ isAxiosError: true })).toBe(true);
 			expect(axios.isAxiosError({ isAxiosError: false })).toBe(false);
+		});
+	});
+
+	describe('options.signal (request cancellation)', () => {
+		it('should pass signal directly to fetch when no timeout is set', async () => {
+			const controller = new AbortController();
+			const fetchMock = jest.fn(() =>
+				Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve('') } as any)
+			);
+			await axios.get('/foo', {
+				signal: controller.signal,
+				fetch: fetchMock as any
+			});
+			expect(fetchMock.mock.calls[0][1].signal).toBe(controller.signal);
+		});
+
+		it('should reject with ERR_CANCELED when signal is already aborted', async () => {
+			const controller = new AbortController();
+			controller.abort();
+			try {
+				await axios.get(`${baseUrl}/delay/200`, { signal: controller.signal });
+				throw new Error('should have rejected');
+			} catch (err: any) {
+				expect(err.isAxiosError).toBe(true);
+				expect(err.code).toEqual('ERR_CANCELED');
+				expect(err.status).toEqual(0);
+				expect(axios.isCancel(err)).toBe(true);
+			}
+		});
+
+		it('should abort an in-flight request when signal is triggered', async () => {
+			const controller = new AbortController();
+			const promise = axios.get(`${baseUrl}/delay/5000`, { signal: controller.signal });
+			setTimeout(() => controller.abort(), 10);
+			try {
+				await promise;
+				throw new Error('should have rejected');
+			} catch (err: any) {
+				expect(err.isAxiosError).toBe(true);
+				expect(err.code).toEqual('ERR_CANCELED');
+				expect(err.message).toEqual('canceled');
+				expect(axios.isCancel(err)).toBe(true);
+			}
+		});
+
+		it('should not affect successful requests when signal is not aborted', async () => {
+			const controller = new AbortController();
+			const res = await axios.get(`${baseUrl}/example.txt`, { signal: controller.signal });
+			expect(res.status).toEqual(200);
+			expect(res.data).toEqual('some example content');
+		});
+	});
+
+	describe('options.timeout', () => {
+		it('should reject with ECONNABORTED when request exceeds timeout', async () => {
+			try {
+				await axios.get(`${baseUrl}/delay/5000`, { timeout: 50 });
+				throw new Error('should have rejected');
+			} catch (err: any) {
+				expect(err.isAxiosError).toBe(true);
+				expect(err.code).toEqual('ECONNABORTED');
+				expect(err.message).toEqual('timeout of 50ms exceeded');
+				expect(err.status).toEqual(0);
+			}
+		});
+
+		it('should not timeout if request completes within the limit', async () => {
+			const res = await axios.get(`${baseUrl}/delay/10`, { timeout: 5000 });
+			expect(res.status).toEqual(200);
+			expect(res.data).toEqual({ delayed: 10 });
+		});
+
+		it('should ignore timeout when set to 0', async () => {
+			const res = await axios.get(`${baseUrl}/example.txt`, { timeout: 0 });
+			expect(res.status).toEqual(200);
+			expect(res.data).toEqual('some example content');
+		});
+
+		it('should work together with signal (timeout fires first)', async () => {
+			const controller = new AbortController();
+			try {
+				await axios.get(`${baseUrl}/delay/5000`, {
+					timeout: 50,
+					signal: controller.signal
+				});
+				throw new Error('should have rejected');
+			} catch (err: any) {
+				expect(err.code).toEqual('ECONNABORTED');
+				expect(axios.isCancel(err)).toBe(false);
+			}
+		});
+
+		it('should work together with signal (cancel fires first)', async () => {
+			const controller = new AbortController();
+			const promise = axios.get(`${baseUrl}/delay/5000`, {
+				timeout: 5000,
+				signal: controller.signal
+			});
+			setTimeout(() => controller.abort(), 10);
+			try {
+				await promise;
+				throw new Error('should have rejected');
+			} catch (err: any) {
+				expect(err.code).toEqual('ERR_CANCELED');
+				expect(axios.isCancel(err)).toBe(true);
+			}
+		});
+	});
+
+	describe('axios.isCancel', () => {
+		it('should return true for cancel errors', () => {
+			expect(axios.isCancel({ code: 'ERR_CANCELED' })).toBe(true);
+		});
+
+		it('should return false for non-cancel errors', () => {
+			expect(axios.isCancel({ code: 'ERR_NETWORK' })).toBe(false);
+			expect(axios.isCancel({ code: 'ERR_BAD_REQUEST' })).toBe(false);
+			expect(axios.isCancel({ code: 'ECONNABORTED' })).toBe(false);
+			expect(axios.isCancel(new Error('nope'))).toBe(false);
+			expect(axios.isCancel(null)).toBe(false);
+			expect(axios.isCancel(undefined)).toBe(false);
 		});
 	});
 

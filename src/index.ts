@@ -55,6 +55,8 @@ export interface Options {
 	baseURL?: string;
 	fetch?: typeof globalThis.fetch;
 	data?: any;
+	signal?: AbortSignal;
+	timeout?: number;
 }
 
 export interface Response<T = any> {
@@ -74,7 +76,7 @@ export interface RedaxiosError<T = any> extends Error {
 	config: Options;
 	response: Response<T>;
 	status: number;
-	code: 'ERR_BAD_REQUEST' | 'ERR_BAD_RESPONSE' | 'ERR_NETWORK';
+	code: 'ERR_BAD_REQUEST' | 'ERR_BAD_RESPONSE' | 'ERR_NETWORK' | 'ERR_CANCELED' | 'ECONNABORTED';
 	isAxiosError: true;
 }
 
@@ -100,6 +102,7 @@ export interface RedaxiosInstance {
 	defaults: Options;
 	create: (defaults?: Options) => RedaxiosInstance;
 	isAxiosError: (value: any) => value is RedaxiosError;
+	isCancel: (value: any) => boolean;
 }
 
 function deepMerge(
@@ -199,13 +202,35 @@ function create(defaults?: Options): RedaxiosInstance {
 
 		const fetchFunc = options.fetch || fetch;
 
+		let fetchSignal: AbortSignal | undefined = options.signal;
+		let timeoutId: ReturnType<typeof setTimeout> | undefined;
+		let isTimeout = false;
+
+		if (options.timeout && options.timeout > 0) {
+			const controller = new AbortController();
+			if (fetchSignal) {
+				if (fetchSignal.aborted) {
+					controller.abort(fetchSignal.reason);
+				} else {
+					fetchSignal.addEventListener('abort', () => controller.abort(fetchSignal!.reason), { once: true });
+				}
+			}
+			timeoutId = setTimeout(() => {
+				isTimeout = true;
+				controller.abort();
+			}, options.timeout);
+			fetchSignal = controller.signal;
+		}
+
 		return fetchFunc(url, {
 			method: (_method || (options.method as string) || 'get').toUpperCase(),
 			body: data,
 			headers: deepMerge(options.headers as Record<string, string>, customHeaders, true) as Record<string, string>,
-			credentials: options.withCredentials ? 'include' : undefined
+			credentials: options.withCredentials ? 'include' : undefined,
+			signal: fetchSignal
 		})
 			.then((res) => {
+				if (timeoutId) clearTimeout(timeoutId);
 				for (const i in res) {
 					if (typeof (res as any)[i] !== 'function') (response as any)[i] = (res as any)[i];
 				}
@@ -232,7 +257,16 @@ function create(defaults?: Options): RedaxiosInstance {
 					});
 			})
 			.catch((err) => {
+				if (timeoutId) clearTimeout(timeoutId);
 				if (err.isAxiosError) return Promise.reject(err);
+				if (isTimeout) {
+					return Promise.reject(
+						createError(`timeout of ${options.timeout}ms exceeded`, options, response, 0, 'ECONNABORTED')
+					);
+				}
+				if (fetchSignal?.aborted) {
+					return Promise.reject(createError('canceled', options, response, 0, 'ERR_CANCELED'));
+				}
 				return Promise.reject(createError(err.message || 'Network Error', options, response, 0, 'ERR_NETWORK'));
 			});
 	}
@@ -253,6 +287,7 @@ function create(defaults?: Options): RedaxiosInstance {
 	instance.defaults = defaults;
 	instance.create = create;
 	instance.isAxiosError = (value: any): value is RedaxiosError => value?.isAxiosError === true;
+	instance.isCancel = (value: any): boolean => value?.code === 'ERR_CANCELED';
 
 	return instance;
 }

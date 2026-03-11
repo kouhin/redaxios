@@ -21,8 +21,10 @@ This fork addresses all of the above while keeping the original design philosoph
 ## Changes from upstream
 
 - **Full TypeScript rewrite** with exported types: `Options`, `Response`, `RedaxiosError`, `RedaxiosInstance`, etc.
-- **Axios-compatible error handling** -- errors are proper `Error` instances with `message`, `status`, `code` (`ERR_BAD_REQUEST` / `ERR_BAD_RESPONSE` / `ERR_NETWORK`), `response`, `config`, and `isAxiosError` flag.
+- **Axios-compatible error handling** -- errors are proper `Error` instances with `message`, `status`, `code` (`ERR_BAD_REQUEST` / `ERR_BAD_RESPONSE` / `ERR_NETWORK` / `ERR_CANCELED` / `ECONNABORTED`), `response`, `config`, and `isAxiosError` flag.
 - **`axios.isAxiosError()` helper** for type-safe error checking.
+- **Request cancellation** via `AbortController` / `signal` option, with `axios.isCancel()` helper.
+- **Request timeout** via `timeout` option (in milliseconds), implemented with `AbortController`.
 - **Modern toolchain**: [Bun](https://bun.sh) for package management, building, and testing; [Biome](https://biomejs.dev) for linting and formatting.
 - **ESM + CJS dual output** (UMD removed as obsolete).
 
@@ -62,10 +64,30 @@ try {
   }
 }
 
+// Request cancellation
+const controller = new AbortController();
+axios.get('/api/slow', { signal: controller.signal })
+  .catch(err => {
+    if (axios.isCancel(err)) {
+      console.log('Request canceled');
+    }
+  });
+controller.abort();
+
+// Request timeout (in milliseconds)
+try {
+  await axios.get('/api/slow', { timeout: 5000 });
+} catch (err) {
+  if (axios.isAxiosError(err) && err.code === 'ECONNABORTED') {
+    console.error('Request timed out');
+  }
+}
+
 // Create an instance with defaults
 const api = axios.create({
   baseURL: 'https://api.example.com',
   headers: { Authorization: 'Bearer token' },
+  timeout: 10000,
 });
 await api.get('/me');
 ```
@@ -80,8 +102,10 @@ This library is designed as a drop-in replacement for [Axios]. Refer to the [Axi
 - `axios.get()`, `.post()`, `.put()`, `.patch()`, `.delete()`, `.head()`, `.options()`
 - `axios.create(defaults)`
 - `axios.all()` / `axios.spread()`
-- `axios.isAxiosError()`
+- `axios.isAxiosError()` / `axios.isCancel()`
 - `axios.CancelToken` (maps to `AbortController`)
+- Request cancellation via `signal` (`AbortSignal`)
+- Request timeout via `timeout` (milliseconds)
 - Request/response interceptors via `transformRequest`
 - `baseURL`, `params`, `paramsSerializer`, `headers`, `auth`, `validateStatus`
 - `responseType` (`text`, `json`, `blob`, `arrayBuffer`, `stream`, `formData`)
