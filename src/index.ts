@@ -98,7 +98,6 @@ export interface RedaxiosInstance {
 	patch: BodyMethod;
 	all: typeof Promise.all;
 	spread: <Args, R>(fn: (...args: Args[]) => R) => (array: Args[]) => R;
-	CancelToken: typeof AbortController;
 	defaults: Options;
 	create: (defaults?: Options) => RedaxiosInstance;
 	isAxiosError: (value: any) => value is RedaxiosError;
@@ -283,7 +282,6 @@ function create(defaults?: Options): RedaxiosInstance {
 	instance.patch = (url, data, config) => redaxios(url, config, 'patch', data);
 	instance.all = Promise.all.bind(Promise);
 	instance.spread = (fn) => (fn as any).apply.bind(fn, fn);
-	instance.CancelToken = (typeof AbortController === 'function' ? AbortController : Object) as typeof AbortController;
 	instance.defaults = defaults;
 	instance.create = create;
 	instance.isAxiosError = (value: any): value is RedaxiosError => value?.isAxiosError === true;

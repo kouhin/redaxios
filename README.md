@@ -103,7 +103,6 @@ This library is designed as a drop-in replacement for [Axios]. Refer to the [Axi
 - `axios.create(defaults)`
 - `axios.all()` / `axios.spread()`
 - `axios.isAxiosError()` / `axios.isCancel()`
-- `axios.CancelToken` (maps to `AbortController`)
 - Request cancellation via `signal` (`AbortSignal`)
 - Request timeout via `timeout` (milliseconds)
 - Request/response interceptors via `transformRequest`
